@@ -87,4 +87,6 @@ target/
 
 # Mypy cache
 .mypy_cache/
+
+# Added by DVC
 /data
