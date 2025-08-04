@@ -1,11 +1,59 @@
+# Master Thesis: Citation Distribution in Scientometric Search Engines
+
+## Cel projektu
+
+Celem pracy magisterskiej było przeprowadzenie eksperymentu symulującego działanie wyszukiwarki naukowej – podobnej do Google Scholar – umożliwiającej rankingowanie wyników wyszukiwania na podstawie różnych wag i metryk, takich jak:
+- liczba cytowań,
+- data publikacji,
+- punktacja naukowa (np. MNiSW).
+
+W ramach eksperymentu skonstruowano **sztuczny agregator prac naukowych** z mechanizmem paginacji oraz różnymi strategiami sortowania wyników.
+
+---
+
+## Opis projektu
+
+System składa się z pięciu głównych komponentów:
+
+1. **Przygotowanie danych źródłowych**: integracja informacji o czasopismach, konferencjach i publikacjach.
+2. **Generacja zapytań**: tworzenie zapytań tekstowych z wykorzystaniem słowników części mowy.
+3. **Embeddingi i baza wektorowa**: generacja reprezentacji semantycznych zapytań oraz artykułów.
+4. **Silnik wyszukujący**: rankingowanie wyników według wybranych parametrów.
+5. **Eksperymenty i analiza**: ocena wpływu wybranych strategii na rozkład cytowań wyników.
+
+Eksperyment miał na celu sprawdzić, jak różne algorytmy rankingowe wpływają na widoczność artykułów o różnej liczbie cytowań.
+
+---
+
+## Przebieg eksperymentu
+
+1. **Wczytanie danych**
+   - `dblp-ref-10` (zbiory publikacji)
+   - Lista czasopism i punktów naukowych
+
+2. **Generacja zapytań**
+   - Na podstawie list słów (rzeczowniki, czasowniki itd.)
+   - Embeddingi zapytań przygotowane za pomocą Sentence Transformers
+
+3. **Symulacja wyszukiwań**
+   - Dla każdego zapytania: wyszukiwanie podobnych artykułów
+   - Paginacja wyników (np. top 10, top 20)
+   - Różne strategie sortowania
+
+4. **Eksperyment dystrybucji**
+   - Zapisywanie wyników (liczby cytowań, pozycji, wag sortowania)
+   - Analiza rozkładów cytowań (czy wyniki promują prace cytowane?)
+
+5. **Podsumowanie i wizualizacja**
+   - Porównanie rozkładów wyników (PDF, CND)
+   - Próba dopasowania do rozkładu potęgowego (power law)
+
+---
+
+## Struktura projektu
+
+```
 master_thesis
-==============================
-
-A short description of the project.
-
-Project Organization
-------------
-
     ├── LICENSE
     ├── Makefile           <- Makefile with commands like `make data` or `make train`
     ├── README.md          <- The top-level README for developers using this project.
@@ -51,7 +99,30 @@ Project Organization
     │
     └── tox.ini            <- tox file with settings for running tox; see tox.readthedocs.io
 
+```
 
---------
+---
+
+## Dokumentacja
+
+Omówienie notatników python znajduje się [tutaj](./docs/Instruction.md)
+
+---
+
+## Wymagania
+
+Aby zainstalować środowisko, uruchom:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Źródło szablonu
 
 <p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
+
+---
+
+© 2025 Autor pracy magisterskiej. Wszelkie prawa zastrzeżone.
