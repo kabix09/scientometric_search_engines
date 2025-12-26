@@ -16,6 +16,12 @@ W trakcie rozwoju silnika `Scientometrics` zidentyfikowano i wyeliminowano błę
 
 * **[Similarity vs Distance](changelog/similarity_logic.md)**
     * ChromaDB domyślnie zwraca distances. W kodzie sortowanie `reverse=True` (malejąco) promowało artykuły z największym dystansem, czyli najmniej podobne. Poprawiono to, przekształcając dystans w miarę podobieństwa: `similarity=1−distance`.
+
+* **[Normalizacja Globalna i Logarytmiczna](changelog/global_scaling.md)**:
+    * Wyeliminowano problem "relatywizmu lokalnego", w którym lokalny lider popularności (np. 5 cytowań) był oceniany identycznie jak lider globalny (10 000 cytowań). 
+    * Wprowadzono transformację logarytmiczną $\log(1+x)$ oraz **Global Scaler** wyuczony na pełnym zbiorze danych (300k+ rekordów). 
+    * Zmiana ta zapewnia spójność wyników między batchami oraz poprawną reprezentację rozkładów potęgowych (Power Law), co jest fundamentem rzetelnych badań naukometrycznych.
+
 ---
 
 ## Pozostałe materiały

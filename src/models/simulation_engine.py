@@ -17,10 +17,8 @@ a probabilistic distribution of selected papers.
 import collections
 import numpy as np
 import pandas as pd
-
-from sklearn.preprocessing import MinMaxScaler
+import joblib  # Added for loading the global scaler
 import chromadb
-
 
 # -------------------------------------------------------------------
 # Virtual aggregation engine
@@ -37,19 +35,22 @@ class VirtualAggregator:
 
     def __init__(self):
         """
-        Initialize the aggregator and establish a connection
-        to the ChromaDB collection.
+        Initialize the aggregator and load the PRE-FITTED global scaler.
         """
         self.N = None
         self.k = None
         self.pn = None
         self.chroma_collection = None
-        self.scaler = MinMaxScaler()
+        
+        # Load global scaler instead of local fitting
+        # Ensure you have generated this file using prepare_global_scaler.py
+        try:
+            self.scaler = joblib.load('models/global_scaler.pkl')
+        except FileNotFoundError:
+            raise RuntimeError("Global scaler not found at models/global_scaler.pkl. Run preparation script first.")
+            
         self.init_connection()
 
-    # -------------------------------------------------------------------
-    # Configuration
-    # -------------------------------------------------------------------
     def set_parameters(self, N, k, pn):
         """
         Set simulation parameters.
@@ -144,22 +145,27 @@ class VirtualAggregator:
             collections.Counter: Selected paper identifiers with frequencies.
         """
 
-        # 1. Przygotowanie cech i wektoryzacja score
+        # 1. Feature preparation with Log Scaling (Solution 2)
+        citations_raw = np.array(collection_dict["n_citation"])
+        citations_log = np.log1p(citations_raw)
+
+        # 2. Apply GLOBAL Scaling (Solution 1)
+        # We use .transform() instead of .fit_transform() to maintain consistency across batches
         values_to_scale = np.array([
             collection_dict["year"],
-            collection_dict["n_citation"],
+            citations_log,
             collection_dict["gov_score"]
         ]).T
+        
+        scaled_values = self.scaler.transform(values_to_scale)
 
-        scaled_values = self.scaler.fit_transform(values_to_scale)
-
-        # Wektoryzacja obliczeń (dużo szybciej niż pętla for)
-        # Pobranie surowych dystansów z bazy
+        # 3. Distance to Similarity transformation (Point A)
         distances = np.array(collection_dict["distance"])
 
         # Konwersja na podobieństwo: 1.0 - dystans (z progiem bezpieczeństwa 0.0)
         similarities = np.maximum(0, 1 - distances)
 
+        # 4. Final weighted score calculation
         # pn[0]*sim + pn[1]*year + pn[2]*citations + pn[3]*gov
         scores = (
             self.pn[0] * similarities +
@@ -168,7 +174,7 @@ class VirtualAggregator:
             self.pn[3] * scaled_values[:, 2]
         )
 
-        # 2. Sortowanie i podział na strony
+        # 5. Sorting and Pagination
         sorted_indices = np.argsort(-scores)
         ranked_ids = np.array(collection_dict["id"])[sorted_indices].tolist()
         
@@ -177,14 +183,12 @@ class VirtualAggregator:
             for i in range(0, len(ranked_ids), self.N)
         ]
 
-        # 3. Losowanie (poprawiona logika bez powtórzeń)
-        # Initial distribution setup
+        # 6. Sampling (Fixed logic - sampling without replacement)
         selected_papers = []
         # working_pages ensures we don't modify the source structure accidentally
         working_pages = [list(p) for p in pages]
 
-        for iteration in range(self.k):
-            # Find indices of pages that are NOT empty
+        for _ in range(self.k):
             active_indices = [idx for idx, p in enumerate(working_pages) if len(p) > 0]
             
             if not active_indices:
