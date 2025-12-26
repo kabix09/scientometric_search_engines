@@ -3,3 +3,5 @@
 # https://dvc.org/doc/user-guide/dvcignore
 
 /data/chroma/
+/data/results/
+/data/results_michal/
