@@ -14,6 +14,7 @@ import csv
 import gc
 import logging
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 
 try:
@@ -83,6 +84,7 @@ class Experiment:
         self.load_queries()
 
         progress_status = self.health_check()
+        # Przyjmujemy postęp na podstawie pierwszej konfiguracji (indeks 0)
         already_saved = int(progress_status.get(0, {}).get("controll_sum", 0) or 0)
 
         logger.info(f"Skipping already processed queries: {already_saved}")
@@ -92,18 +94,25 @@ class Experiment:
         processed = 0
 
         start_index = already_saved
-        end_index = start_index + batch
+        # Zapewnienie, że nie wyjdziemy poza zakres dostępnych zapytań
+        end_index = min(start_index + batch, len(self.queries))
 
         logger.info(f"Processing query range: {start_index}–{end_index}")
 
         for query_offset, query_embedding in enumerate(
             tqdm(self.queries[start_index:end_index], desc="Queries")
         ):
+            # Zapewnia ciągłość losowości między batchami
+            global_query_id = start_index + query_offset
+            np.random.seed(hash(str(42 + global_query_id)) % (2**32 - 1))
+
+            # Pobranie wyników wyszukiwania (Top 250)
             self.similar_articles = self.virtual_aggregator.get_similar_articles(
                 query_embedding,
                 max_similarities=250
             )
 
+            # Iteracja przez wszystkie konfiguracje parametrów
             for settings_id, config in enumerate(self.settings):
                 self.virtual_aggregator.set_parameters(
                     config["N"],
@@ -113,19 +122,17 @@ class Experiment:
 
                 step_distribution = self.step()
 
+                # Buforowanie wyników szczegółowych dla danego zapytania
                 if settings_id not in result_buffer:
                     result_buffer[settings_id] = {
-                        "query_id": [start_index + query_offset],
+                        "query_id": [global_query_id],
                         "distribution": [dict(step_distribution)]
                     }
                 else:
-                    result_buffer[settings_id]["query_id"].append(
-                        start_index + query_offset
-                    )
-                    result_buffer[settings_id]["distribution"].append(
-                        dict(step_distribution)
-                    )
+                    result_buffer[settings_id]["query_id"].append(global_query_id)
+                    result_buffer[settings_id]["distribution"].append(dict(step_distribution))
 
+                # Globalna agregacja rozkładów (dla global_distributions.csv)
                 settings_key = str(config)
                 if settings_key in distribution_dict:
                     distribution_dict[settings_key].update(step_distribution)
@@ -134,11 +141,13 @@ class Experiment:
 
             processed += 1
 
+            # Okresowy zapis (Checkpoint) co 500 zapytań
             if processed % 500 == 0:
                 self.save_distribution(distribution_dict)
                 self.save_results(result_buffer)
                 result_buffer = {}
 
+        # Ostateczny zapis pozostałości w buforze
         logger.info("Final result persistence")
         self.save_distribution(distribution_dict)
         self.save_results(result_buffer)
@@ -181,6 +190,8 @@ class Experiment:
         Save per-configuration simulation results to CSV files.
         """
         for settings_id, data in result_dict.items():
+            if not data["query_id"]: continue # Pomiń puste bufory
+            
             directory = f"data/results/{settings_id}"
             os.makedirs(directory, exist_ok=True)
 
@@ -211,6 +222,7 @@ class Experiment:
             columns=["settings", "distribution"]
         )
         df["distribution"] = df["distribution"].apply(dict)
+        # Zapis do processed jako finalny zbiór kanoniczny
         df.to_csv(
             "data/processed/global_distributions.csv",
             index=False
@@ -236,6 +248,7 @@ class Experiment:
             file_path = os.path.join(base_path, str(idx), "results.csv")
             try:
                 with open(file_path, "r") as file:
+                    # Szybkie liczenie linii bez ładowania całego pliku
                     line_count = sum(1 for _ in file) - 1
                     results[idx] = {"controll_sum": max(0, line_count)}
             except FileNotFoundError:

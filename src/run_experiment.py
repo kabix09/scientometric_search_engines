@@ -66,11 +66,6 @@ def main():
     logger.info(f"Loaded {len(settings)} immutable experiment configurations")
 
     # -------------------------------------------------------------------
-    # Reproducibility
-    # -------------------------------------------------------------------
-    np.random.seed(42)
-
-    # -------------------------------------------------------------------
     # Experiment initialization
     # -------------------------------------------------------------------
     experiment = Experiment(settings)

@@ -123,6 +123,7 @@ class VirtualAggregator:
     def distribution_function(self, number_of_pages):
         """
         Compute an exponential probability distribution over result pages.
+        Function: p(x) = e^-x
 
         Args:
             number_of_pages (int): Number of ranked pages.
