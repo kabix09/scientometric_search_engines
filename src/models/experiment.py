@@ -165,7 +165,7 @@ class Experiment:
         collection_dict = {
             "id": self.similar_articles["ids"][0],
             "title": self.similar_articles["documents"][0],
-            "similarity": self.similar_articles["distances"][0],
+            "distance": self.similar_articles["distances"][0],
             "year": [
                 metadata["year"]
                 for metadata in self.similar_articles["metadatas"][0]

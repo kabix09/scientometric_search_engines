@@ -154,9 +154,15 @@ class VirtualAggregator:
         scaled_values = self.scaler.fit_transform(values_to_scale)
 
         # Wektoryzacja obliczeń (dużo szybciej niż pętla for)
+        # Pobranie surowych dystansów z bazy
+        distances = np.array(collection_dict["distance"])
+
+        # Konwersja na podobieństwo: 1.0 - dystans (z progiem bezpieczeństwa 0.0)
+        similarities = np.maximum(0, 1 - distances)
+
         # pn[0]*sim + pn[1]*year + pn[2]*citations + pn[3]*gov
         scores = (
-            self.pn[0] * np.array(collection_dict["similarity"]) +
+            self.pn[0] * similarities +
             self.pn[1] * scaled_values[:, 0] +
             self.pn[2] * scaled_values[:, 1] +
             self.pn[3] * scaled_values[:, 2]
