@@ -44,6 +44,7 @@ class VirtualAggregator:
         self.k = None
         self.pn = None
         self.chroma_collection = None
+        self.scaler = MinMaxScaler()
         self.init_connection()
 
     # -------------------------------------------------------------------
@@ -77,14 +78,14 @@ class VirtualAggregator:
 
         while retries < max_retries:
             try:
-                chroma_client = chromadb.PersistentClient(path="../data/chroma")
+                chroma_client = chromadb.PersistentClient(path="data/chroma")
                 self.chroma_collection = chroma_client.get_or_create_collection(
                     name="articles_with_score"
                 )
                 return
             except Exception as e:
                 retries += 1
-                print(e)
+                print(f"Retry {retries}/{max_retries} - Error: {e}")
 
         raise RuntimeError("Failed to connect to ChromaDB after multiple attempts")
 
@@ -102,20 +103,10 @@ class VirtualAggregator:
         Returns:
             dict: ChromaDB query response.
         """
-        max_retries = 5
-        retries = 0
-
-        while retries < max_retries:
-            try:
-                return self.chroma_collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=max_similarities
-                )
-            except Exception as e:
-                retries += 1
-                print(e)
-
-        raise RuntimeError("Failed to query ChromaDB after multiple attempts")
+        return self.chroma_collection.query(
+            query_embeddings=[query_embedding],
+            n_results=max_similarities
+        )
 
     # -------------------------------------------------------------------
     # Page distribution
@@ -123,7 +114,7 @@ class VirtualAggregator:
     def distribution_function(self, number_of_pages):
         """
         Compute an exponential probability distribution over result pages.
-        Function: p(x) = e^-x
+        Function: p(x) = e^-x (distribution for page selection.)
 
         Args:
             number_of_pages (int): Number of ranked pages.
@@ -152,68 +143,62 @@ class VirtualAggregator:
         Returns:
             collections.Counter: Selected paper identifiers with frequencies.
         """
+
+        # 1. Przygotowanie cech i wektoryzacja score
         values_to_scale = np.array([
             collection_dict["year"],
             collection_dict["n_citation"],
             collection_dict["gov_score"]
         ]).T
 
-        scaler = MinMaxScaler()
-        scaled_values = scaler.fit_transform(values_to_scale)
+        scaled_values = self.scaler.fit_transform(values_to_scale)
 
-        collection_dict["year_normalized"] = scaled_values[:, 0].tolist()
-        collection_dict["citations_normalized"] = scaled_values[:, 1].tolist()
-        collection_dict["points_normalized"] = scaled_values[:, 2].tolist()
-
-        collection_dict["score"] = [
-            self.pn[0] * collection_dict["similarity"][i] +
-            self.pn[1] * collection_dict["year_normalized"][i] +
-            self.pn[2] * collection_dict["citations_normalized"][i] +
-            self.pn[3] * collection_dict["points_normalized"][i]
-            for i in range(len(collection_dict["id"]))
-        ]
-
-        ranked = sorted(
-            [
-                {
-                    "id": collection_dict["id"][i],
-                    "title": collection_dict["title"][i],
-                    "similarity": collection_dict["similarity"][i],
-                    "year": collection_dict["year"][i],
-                    "n_citation": collection_dict["n_citation"][i],
-                    "gov_score": collection_dict["gov_score"][i],
-                    "score": collection_dict["score"][i],
-                }
-                for i in range(len(collection_dict["id"]))
-            ],
-            key=lambda x: x["score"],
-            reverse=True
+        # Wektoryzacja obliczeń (dużo szybciej niż pętla for)
+        # pn[0]*sim + pn[1]*year + pn[2]*citations + pn[3]*gov
+        scores = (
+            self.pn[0] * np.array(collection_dict["similarity"]) +
+            self.pn[1] * scaled_values[:, 0] +
+            self.pn[2] * scaled_values[:, 1] +
+            self.pn[3] * scaled_values[:, 2]
         )
 
-        ranked_ids = [entry["id"] for entry in ranked]
+        # 2. Sortowanie i podział na strony
+        sorted_indices = np.argsort(-scores)
+        ranked_ids = np.array(collection_dict["id"])[sorted_indices].tolist()
+        
         pages = [
-            ranked_ids[i:i + self.N]
+            ranked_ids[i:i + self.N] 
             for i in range(0, len(ranked_ids), self.N)
         ]
 
-        page_distribution = self.distribution_function(len(pages))
+        # 3. Losowanie (poprawiona logika bez powtórzeń)
+        # Initial distribution setup
         selected_papers = []
-
-        last_page_count = len(pages)
-        active_pages = pages
+        # working_pages ensures we don't modify the source structure accidentally
+        working_pages = [list(p) for p in pages]
 
         for iteration in range(self.k):
-            if self.k > self.N and iteration >= self.N:
-                active_pages = [page for page in pages if page]
-                if len(active_pages) != last_page_count:
-                    page_distribution = self.distribution_function(len(active_pages))
-                    last_page_count = len(active_pages)
+            # Find indices of pages that are NOT empty
+            active_indices = [idx for idx, p in enumerate(working_pages) if len(p) > 0]
+            
+            if not active_indices:
+                break
 
-            page_idx = np.random.choice(len(active_pages), p=page_distribution)
-            page = active_pages[page_idx]
+            # Re-calculate distribution based on the current number of non-empty pages
+            page_distribution = self.distribution_function(len(active_indices))
+
+            # Select relative index from the list of active pages
+            rel_idx = np.random.choice(len(active_indices), p=page_distribution)
+            # Map relative index back to the absolute page index
+            abs_page_idx = active_indices[rel_idx]
+            
+            # Select and remove the paper from the specific page
+            page = working_pages[abs_page_idx]
             paper_id = np.random.choice(page)
 
             selected_papers.append(paper_id)
-            pages[page_idx] = [pid for pid in page if pid != paper_id]
+            
+            # Remove the selected paper from the page to allow sampling without replacement
+            working_pages[abs_page_idx].remove(paper_id)
 
         return collections.Counter(selected_papers)
