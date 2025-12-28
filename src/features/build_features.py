@@ -104,11 +104,20 @@ class FeatureBuilder:
         """
         Load embedded articles into a persistent ChromaDB collection.
 
+        This method reads a pickle file containing article embeddings,
+        initializes a persistent ChromaDB client, creates or retrieves
+        the target collection, and uploads embeddings in batches.
+        
         Args:
-            df_path (str): Pickle file containing embeddings.
+            df_path (str): Path to the pickle file containing article embeddings.
             chroma_path (str): Directory for ChromaDB persistence.
-            collection_name (str): ChromaDB collection name.
-            batch_size (int): Upload batch size.
+            collection_name (str): Name of the target ChromaDB collection.
+            batch_size (int): Number of records uploaded per batch.
+
+        Notes:
+            - The method uses `tqdm` to display a progress bar for the upload.
+            - Metadata for each article (year, citation count, government score)
+            is stored alongside the embedding vectors.
         """
         logger.info(f"Initializing ChromaDB at {chroma_path}")
         df = pd.read_pickle(df_path)
@@ -206,6 +215,40 @@ class FeatureBuilder:
 
         logger.info(f"Query embeddings saved to {output_path}")
 
+
+    def validate_collection(self, df_path, chroma_path, collection_name="articles_with_score"):
+        """
+        Validate consistency between source DataFrame (.pkl) and ChromaDB collection.
+
+        This method performs a health check to ensure that all articles
+        from the source embeddings file are correctly loaded into ChromaDB.
+
+        Args:
+            df_path (str): Path to the source pickle file with article embeddings.
+            chroma_path (str): Directory of the persistent ChromaDB database.
+            collection_name (str): Name of the ChromaDB collection to validate.
+
+        Returns:
+            bool: True if the collection size matches the DataFrame, False otherwise.
+        """
+        logger.info(f"Checking integrity for collection: {collection_name}")
+        
+        # Load the source DataFrame containing embeddings
+        df = pd.read_pickle(df_path)
+        expected_size = len(df)  # Number of expected records
+        
+        # Connect to ChromaDB and get the collection
+        client = chromadb.PersistentClient(path=chroma_path)
+        collection = client.get_collection(name=collection_name)
+        actual_size = collection.count()  # Number of records actually in ChromaDB
+        
+        # Compare expected vs actual number of records
+        if actual_size == expected_size:
+            logger.info(f"HEALTH CHECK PASSED: Collection size ({actual_size}) matches DataFrame.")
+            return True
+        else:
+            logger.error(f"HEALTH CHECK FAILED: Expected {expected_size}, but ChromaDB has {actual_size}!")
+            return False
 
 # -------------------------------------------------------------------
 # Script entry point

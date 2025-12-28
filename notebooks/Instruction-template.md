@@ -96,3 +96,16 @@ CND & PDF przedstawiających rozkąłdy cytowań na
 a) danych źródłowych DPLR
 b) wygenerownych danych
 
+```
+master_thesis/
+├── README.md               <-- Ogólny opis: jak to zainstalować i odpalić (bardzo ważne!)
+├── references/             <-- Dokumentacja merytoryczna (Twoje pliki .md)
+│   ├── data_dictionary.md
+│   ├── simulation_logic.md
+│   └── parameter_description.md
+├── docs/                   <-- Dokumentacja techniczna (Sphinx, instrukcje obsługi)
+│   ├── index.rst
+│   └── setup_guide.md      <-- Możesz tu dodać pliki .md, Sphinx je obsłuży
+└── reports/                <-- Notatki do pracy magisterskiej i raporty z eksperymentów
+    └── experiment_notes.md
+```

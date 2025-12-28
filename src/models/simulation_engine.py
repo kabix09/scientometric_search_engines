@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import joblib  # Added for loading the global scaler
 import chromadb
+import random
 
 # -------------------------------------------------------------------
 # Virtual aggregation engine
@@ -176,8 +177,8 @@ class VirtualAggregator:
 
         # 5. Sorting and Pagination
         sorted_indices = np.argsort(-scores)
-        ranked_ids = np.array(collection_dict["id"])[sorted_indices].tolist()
-        
+        ranked_ids = [str(x) for x in np.array(collection_dict["id"])[sorted_indices]]
+
         pages = [
             ranked_ids[i:i + self.N] 
             for i in range(0, len(ranked_ids), self.N)
@@ -204,7 +205,7 @@ class VirtualAggregator:
             
             # Select and remove the paper from the specific page
             page = working_pages[abs_page_idx]
-            paper_id = np.random.choice(page)
+            paper_id = random.choice(page)
 
             selected_papers.append(paper_id)
             

@@ -255,3 +255,48 @@ class Experiment:
                 results[idx] = {"controll_sum": 0}
 
         return results
+
+    # -------------------------------------------------------------------
+    # Atomic execution (for testing/notebooks)
+    # -------------------------------------------------------------------
+    def run_single_query(self, query_id_or_embedding, seed=42):
+        """
+        Execute simulation for exactly one query across all settings.
+        Does NOT save results to disk.
+
+        Args:
+            query_id_or_embedding (int or list): Index in self.queries OR raw embedding.
+            seed (int): Seed for reproducibility.
+
+        Returns:
+            dict: {settings_id: Counter_distribution}
+        """
+        # 1. Przygotowanie embeddingu
+        if isinstance(query_id_or_embedding, int):
+            if self.queries is None:
+                self.load_queries()
+            query_embedding = self.queries[query_id_or_embedding]
+            q_id = query_id_or_embedding
+        else:
+            query_embedding = query_id_or_embedding
+            q_id = "manual_test"
+
+        # 2. Ustawienie ziarna dla tego konkretnego testu
+        np.random.seed(seed)
+
+        # 3. Pobranie wyników z bazy (Top 250)
+        self.similar_articles = self.virtual_aggregator.get_similar_articles(
+            query_embedding, 
+            max_similarities=250
+        )
+
+        # 4. Iteracja przez konfiguracje i zbieranie wyników w pamięci
+        test_results = {}
+        for settings_id, config in enumerate(self.settings):
+            self.virtual_aggregator.set_parameters(
+                config["N"], config["k"], config["pn"]
+            )
+            # Metoda step() używa aktualnego self.similar_articles
+            test_results[settings_id] = self.step()
+
+        return test_results

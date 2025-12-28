@@ -11,7 +11,7 @@ df = pd.read_csv('data/interim/articles_with_score_df.csv')
 df['n_citation_log'] = np.log1p(df['n_citation'])
 
 scaler = MinMaxScaler()
-scaler.fit(df[['year', 'n_citation_log', 'gov_score']])
+scaler.fit(df[['year', 'n_citation_log', 'gov_score']].values)
 
 # Zapis scaler'a
 joblib.dump(scaler, 'models/global_scaler.pkl')
