@@ -1,163 +1,87 @@
-Instrukcja projektu Scientometrics
-===================================
+Scientometrics Simulation System (S3) – Dokumentacja
+=====================================================
 
-Spis plików i zależności
--------------------------
+System symulacji zachowań naukometrycznych oparty na wyszukiwaniu semantycznym, uwzględniający polskie parametry punktacji ministerialnej oraz analizę rozkładów potęgowych (Power Law).
 
-.. list-table::
-   :header-rows: 1
+.. toctree::
+   :maxdepth: 2
+   :caption: Spis treści:
 
-   * - Skrypt / Moduł
-     - Opis
-   * - ``scientometrics_quotes``
-     - Przetwarza dane wejściowe, łączy dane o publikacjach i czasopismach
-   * - ``scientometrisc_search_engine``
-     - Generuje zapytania (frazy) do silnika semantycznego
-   * - ``scientometrics_queries_generator``
-     - Generuje embeddingi oraz przygotowuje dane dla bazy wektorowej
-   * - ``scientometrics_distribution_experiment-*``
-     - Przeprowadza eksperymenty z dystrybucją cytowań
-   * - ``scientometrics_distribution_summary``
-     - Agreguje wyniki i generuje wykresy końcowe
+   getting-started
+   commands
+   changelog
 
-Workflow (schemat przepływu danych)
+Workflow (Schemat przepływu danych)
 -----------------------------------
+
+System realizuje dwie równoległe ścieżki: empiryczną (Ground Truth) oraz symulacyjną, które spotykają się w module wizualizacji.
 
 .. mermaid::
 
    graph TD
+      A[Raw Data: DBLP + MEiN] -->|make_dataset.py| B[Interim Data]
 
-   A[Input Files] --> B[scientometrics_quotes]
-   B --> B1[articles_with_score_df.csv]
+      %% Ścieżka Empiryczna
+      B --> P1[data/processed/dblp_distribution_citations.csv]
 
-   B1 --> C[scientometrisc_search_engine]
-   C --> C1[queries_df, queries_with_embedding.pkl, titles_with_embeddings.pk]
+      %% Ścieżka Symulacyjna
+      B -->|build_features.py| C[Global Scaler]
+      B -->|feature_builder.py| D[ChromaDB & Embeddings]
 
-   C1 --> D[scientometrics_queries_generator]
-   D --> D1[pre_chroma_data.pk]
+      C --> E[simulation_engine.py]
+      D --> E
 
-   D1 --> E[scientometrics_distribution_experiment_embedding-copy-1]
-   E --> E1[settings_primary.pkl]
-   E --> E2[results/<settings_id>/results.csv, distributions.csv]
+      E -->|experiment.py| F[Experiment Orchestrator]
+      F --> G[data/results/*/results.csv]
+      G --> P2[data/processed/global_distributions.csv]
 
-   E2 --> F[scientometrics_distribution_summary-Copy1]
-   F --> G[Wykresy i analizy końcowe]
+      P1 --> H[visualize.py]
+      P2 --> H
+      H --> I[Raporty PDF/CDF & Analiza Power Law]
 
-Szczegółowy opis modułów
--------------------------
+Szczegółowy opis modułów (src/)
+-------------------------------
 
-scientometrics_quotes
-^^^^^^^^^^^^^^^^^^^^^^
+1. src.data.make_dataset
+^^^^^^^^^^^^^^^^^^^^^^^^
+Moduł ETL odpowiedzialny za czyszczenie danych wejściowych.
+* **Funkcja**: Łączy dane publikacyjne DBLP z oficjalnym wykazem punktacji MEiN/MNiSW.
+* **Wyjście**: ``data/interim/articles_with_score_df.csv`` oraz empiryczny punkt odniesienia ``data/processed/dblp_distribution_citations.csv``.
 
-**Opis:**  
-Łączy dane z publikacji (``dblp-ref-10``) i listy dyscyplin (``Wykaz_dyscyplin_do_czasopism_i_materiałów_konferencyjnych.xlsx``).  
-Tworzy dataframe z artykułami oraz ich punktacją.
+2. src.features.build_features
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Odpowiada za przygotowanie statystyczne danych.
+* **Funkcja**: Logarytmizacja liczby cytowań oraz trenowanie globalnej normalizacji (Global Scaler).
+* **Wyjście**: ``models/global_scaler.pkl``.
 
-**Pliki wejściowe:**
+3. src.features.feature_builder
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Moduł semantyczny systemu.
+* **Funkcja**: Generuje embeddingi zapytań i artykułów (Sentence Transformers) oraz zasila bazę wektorową ChromaDB.
 
-- ``../data/external/Wykaz_dyscyplin_do_czasopism_i_materiałów_konferencyjnych.xlsx``
-- ``../data/external/dblp-ref-10``
+4. src.models.simulation_engine
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Rdzeń symulacyjny (Virtual Aggregator).
+* **Funkcja**: Implementuje zachowanie wyszukiwarki: ważony ranking (podobieństwo, cytowania, punktacja) oraz paginację wyników.
 
-**Pliki wyjściowe (pośrednie):**
+5. src.models.experiment
+^^^^^^^^^^^^^^^^^^^^^^^^
+Orkiestrator eksperymentów masowych.
+* **Funkcja**: Obsługuje przetwarzanie wsadowe (batch) i generuje zagregowane rozkłady cytowań dla różnych konfiguracji wag.
 
-- ``../data/interim/articles_with_score_df.csv``
+6. src.visualization.visualize
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Moduł analityczno-porównawczy.
+* **Funkcja**: Generuje wykresy PDF/CDF, estymuje parametry Power Law (alfa, xmin) i analizuje zjawisko heavy tail.
 
-scientometrisc_search_engine
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Notatniki Badawcze (Test-Driven Analysis)
+-----------------------------------------
 
-**Opis:**  
-Generuje frazy zapytań do wyszukiwania naukowego.  
-Próbowano użyć bibliotek: ``languagetool``, ``gramformer`` (nieskuteczne).  
-Ostatecznie użyto własnej sekcji ``generate queries``.
+Analiza została podzielona na kroki weryfikacyjne w formie notebooków:
 
-**Pliki wejściowe:**
-
-- ``../data/raw/{name}.csv`` — listy części mowy (rzeczowniki, czasowniki, itd.)
-
-**Pliki wyjściowe:**
-
-- ``../data/queries_df``
-- ``../data/queries_with_embedding.pkl``
-- ``../data/interim/titles_with_embeddings.pk``
-
-scientometrics_queries_generator
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-**Opis:**  
-Moduł ten:
-
-- przygotowuje embeddingi  
-- ładuje dane do bazy wektorowej  
-- przetwarza zapytania  
-
-**Pliki wejściowe:**
-
-- ``../data/interim/articles_with_score_df.csv``
-
-**Pliki pośrednie:**
-
-- ``../data/pre_chroma_data.pk``
-
-.. note::
-
-   Sekcja "Word collection initialization" dodaje listy słów do bazy wektorowej — wymaga doprecyzowania.
-
-scientometrics_distribution_experiment
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-**Uwaga:**  
-Większość wersji tego pliku jest nieużywana lub nieskuteczna.
-
-**Używana wersja:** ``scientometrics_distribution_experiment_embedding-copy-1``
-
-**Opis:**  
-
-- Przeprowadza eksperymenty z zapytaniami  
-- Obsługuje przetwarzanie wsadowe (batch) na wypadek przerwań  
-- Nie korzysta z bazy wektorowej (embeddingi są ładowane z pliku)  
-
-**Pliki wejściowe:**
-
-- ``../data/queries_with_embedding.pkl``
-
-**Pliki pośrednie:**
-
-- ``../data/settings_primary.pkl``
-
-**Pliki wynikowe:**
-
-- ``../data/results/{settings_id}.results.csv``
-- ``../distributions.csv``
-
-scientometrics_distribution_experiment_merge
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-**Opis:**
-
-- Scala pliki wynikowe z eksperymentu przeprowadzonego sekwencjami na kilku maszynach
-
-**Pliki wejściowe:**
-
-- ``../data/results_{abc}/{config_id}/results.csv``
-- ``../data/results_{xyz}/{config_id}/results.csv``
-
-**Pliki wynikowe:**
-
-- ``../data/merged_results/{config_id}/results.csv``
-
-scientometrics_distribution_summary
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-**Opis funkcjonalny:**
-
-1. Scalanie wyników eksperymentów  
-2. Analiza rozkładów cytowań (powerlaw — sprawdzić, gdzie dokładnie)  
-3. Generowanie wykresów:
-
-   - CND  
-   - PDF (rozkłady cytowań)
-
-**Źródła danych:**
-
-- Dane źródłowe (DPLR)  
-- Wygenerowane eksperymentalnie
+1. ``01_scientometrics_quotes.ipynb``: Walidacja merge'owania danych MEiN.
+2. ``02_scientometrics_search_engine.ipynb``: Testy bazy wektorowej i embeddingów.
+3. ``03_scientometrics_distribution_experiment.ipynb``: Smoke testy silnika symulacyjnego.
+4. ``04_scientometrics_data_distribution.ipynb``: Analiza wstępna rozkładów.
+5. ``05_scientometrics_statistical_aggregation.ipynb``: Agregacja wyników masowych.
+6. ``06_visualization_dashboard.ipynb``: Finalna analiza porównawcza i dobór parametrów.
