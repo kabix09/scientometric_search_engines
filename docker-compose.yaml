@@ -9,6 +9,15 @@ services:
     networks:
       - chroma-net
 
+  ubuntu_oracular:
+    image: ubuntu:oracular-20240617
+    container_name: ubuntu_oracular_container
+    command: tail -f /dev/null  # to keep the container running
+    volumes:
+      - ./data:/data  # Mount a directory from your host
+    ports:
+      - "8080:80"  # Map ports if needed
+
 volumes:
   index_data:
     driver: local
