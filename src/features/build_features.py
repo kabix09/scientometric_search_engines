@@ -141,7 +141,7 @@ class FeatureBuilder:
                     }
                     for _, row in batch_df.iterrows()
                 ],
-                ids=[str(idx + 1) for idx in batch_df.index]
+                ids=[str(idx + 1) for idx in batch_df.index] # BŁĄD: artykuły zostały zapisane kluczami wierszy a nie id (uuid)
             )
 
         logger.info("ChromaDB ingestion completed")
