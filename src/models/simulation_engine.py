@@ -3,23 +3,24 @@
 """
 Simulation-based aggregation engine.
 
-This module defines the VirtualAggregator class, which simulates the
-selection of scientific publications based on multiple weighted criteria:
+This module defines the VirtualAggregator class, which simulates
+the selection of scientific publications based on multiple weighted criteria:
 - semantic similarity
 - publication year
 - citation count
 - official government score
 
-The class operates on a persistent ChromaDB collection and produces
+The engine operates on a persistent ChromaDB collection and produces
 a probabilistic distribution of selected papers.
 """
 
 import collections
 import numpy as np
 import pandas as pd
-import joblib  # Added for loading the global scaler
+import joblib
 import chromadb
 import random
+
 
 # -------------------------------------------------------------------
 # Virtual aggregation engine
@@ -29,27 +30,29 @@ class VirtualAggregator:
     Simulation engine for probabilistic paper selection.
 
     The engine retrieves semantically similar documents from a vector
-    database, ranks them using a weighted scoring function, paginates
-    the ranking, and samples papers according to an exponential
-    page-based probability distribution.
+    database, computes weighted relevance scores, paginates ranked results,
+    and samples papers according to an exponential page-based probability
+    distribution.
     """
 
     def __init__(self):
         """
-        Initialize the aggregator and load the PRE-FITTED global scaler.
+        Initialize the aggregator and load the pre-fitted global scaler.
         """
         self.N = None
         self.k = None
         self.pn = None
         self.chroma_collection = None
-        
-        # Load global scaler instead of local fitting
-        # Ensure you have generated this file using prepare_global_scaler.py
+
+        # Load globally fitted scaler to ensure consistency across experiments
         try:
-            self.scaler = joblib.load('models/global_scaler.pkl')
+            self.scaler = joblib.load("models/global_scaler.pkl")
         except FileNotFoundError:
-            raise RuntimeError("Global scaler not found at models/global_scaler.pkl. Run preparation script first.")
-            
+            raise RuntimeError(
+                "Global scaler not found at models/global_scaler.pkl. "
+                "Run the scaler preparation step first."
+            )
+
         self.init_connection()
 
     def set_parameters(self, N, k, pn):
@@ -73,7 +76,7 @@ class VirtualAggregator:
         """
         Initialize a persistent connection to the ChromaDB collection.
 
-        Retries the connection several times before failing.
+        The method retries the connection multiple times before failing.
         """
         max_retries = 5
         retries = 0
@@ -103,7 +106,7 @@ class VirtualAggregator:
             max_similarities (int): Number of results to retrieve.
 
         Returns:
-            dict: ChromaDB query response.
+            dict: Raw ChromaDB query response.
         """
         return self.chroma_collection.query(
             query_embeddings=[query_embedding],
@@ -111,12 +114,13 @@ class VirtualAggregator:
         )
 
     # -------------------------------------------------------------------
-    # Page distribution
+    # Page probability distribution
     # -------------------------------------------------------------------
     def distribution_function(self, number_of_pages):
         """
-        Compute an exponential probability distribution over result pages.
-        Function: p(x) = e^-x (distribution for page selection.)
+        Compute an exponential probability distribution over ranked pages.
+
+        The probability of selecting page x is proportional to exp(-x).
 
         Args:
             number_of_pages (int): Number of ranked pages.
@@ -129,87 +133,113 @@ class VirtualAggregator:
         return distribution
 
     # -------------------------------------------------------------------
-    # Ranking and sampling
+    # Candidate preparation
     # -------------------------------------------------------------------
-    def distribution_generator(self, collection_dict):
+    def prepare_candidates(self, results):
         """
-        Rank retrieved articles and sample papers probabilistically.
+        Preprocess candidate articles once per query.
 
-        The ranking score is computed as a weighted sum of normalized
-        features and semantic similarity.
+        This method performs similarity transformation, log-scaling of
+        citation counts, and global normalization of numeric features.
 
         Args:
-            collection_dict (dict): Dictionary containing article attributes:
-                id, title, similarity, year, n_citation, gov_score
+            results (dict): Raw ChromaDB query response.
 
         Returns:
-            collections.Counter: Selected paper identifiers with frequencies.
+            dict: Preprocessed candidate features ready for scoring.
         """
+        ids = [str(x) for x in results["ids"][0]]
 
-        # 1. Feature preparation with Log Scaling (Solution 2)
-        citations_raw = np.array(collection_dict["n_citation"])
-        citations_log = np.log1p(citations_raw)
-
-        # 2. Apply GLOBAL Scaling (Solution 1)
-        # We use .transform() instead of .fit_transform() to maintain consistency across batches
-        values_to_scale = np.array([
-            collection_dict["year"],
-            citations_log,
-            collection_dict["gov_score"]
-        ]).T
-        
-        scaled_values = self.scaler.transform(values_to_scale)
-
-        # 3. Distance to Similarity transformation (Point A)
-        distances = np.array(collection_dict["distance"])
-
-        # Konwersja na podobieństwo: 1.0 - dystans (z progiem bezpieczeństwa 0.0)
+        # Convert distances to similarity scores
+        distances = np.array(results["distances"][0])
         similarities = np.maximum(0, 1 - distances)
 
-        # 4. Final weighted score calculation
-        # pn[0]*sim + pn[1]*year + pn[2]*citations + pn[3]*gov
+        # Extract metadata
+        years = [m["year"] for m in results["metadatas"][0]]
+        citations = [m["n_citation"] for m in results["metadatas"][0]]
+        gov_scores = [m["gov_score"] for m in results["metadatas"][0]]
+
+        # Log-transform citation counts
+        citations_log = np.log1p(np.array(citations))
+
+        # Apply global normalization
+        features = np.column_stack([years, citations_log, gov_scores])
+        scaled_features = self.scaler.transform(features)
+
+        return {
+            "ids": ids,
+            "sim": similarities,
+            "scaled": scaled_features
+        }
+
+    # -------------------------------------------------------------------
+    # Ranking and sampling
+    # -------------------------------------------------------------------
+    def rank_and_sample(self, candidates):
+        """
+        Rank candidate articles and sample papers probabilistically.
+
+        Args:
+            candidates (dict): Output of prepare_candidates().
+
+        Returns:
+            collections.Counter: Sampled paper identifiers with frequencies.
+        """
         scores = (
-            self.pn[0] * similarities +
-            self.pn[1] * scaled_values[:, 0] +
-            self.pn[2] * scaled_values[:, 1] +
-            self.pn[3] * scaled_values[:, 2]
+            self.pn[0] * candidates["sim"] +
+            self.pn[1] * candidates["scaled"][:, 0] +
+            self.pn[2] * candidates["scaled"][:, 1] +
+            self.pn[3] * candidates["scaled"][:, 2]
         )
 
-        # 5. Sorting and Pagination
         sorted_indices = np.argsort(-scores)
-        ranked_ids = [str(x) for x in np.array(collection_dict["id"])[sorted_indices]]
+        ranked_ids = [candidates["ids"][i] for i in sorted_indices]
 
         pages = [
-            ranked_ids[i:i + self.N] 
+            ranked_ids[i:i + self.N]
             for i in range(0, len(ranked_ids), self.N)
         ]
 
-        # 6. Sampling (Fixed logic - sampling without replacement)
         selected_papers = []
-        # working_pages ensures we don't modify the source structure accidentally
         working_pages = [list(p) for p in pages]
 
         for _ in range(self.k):
-            active_indices = [idx for idx, p in enumerate(working_pages) if len(p) > 0]
-            
+            active_indices = [
+                idx for idx, p in enumerate(working_pages) if len(p) > 0
+            ]
             if not active_indices:
                 break
 
-            # Re-calculate distribution based on the current number of non-empty pages
             page_distribution = self.distribution_function(len(active_indices))
-
-            # Select relative index from the list of active pages
             rel_idx = np.random.choice(len(active_indices), p=page_distribution)
-            # Map relative index back to the absolute page index
             abs_page_idx = active_indices[rel_idx]
-            
-            # Select and remove the paper from the specific page
+
             page = working_pages[abs_page_idx]
             paper_id = random.choice(page)
 
             selected_papers.append(paper_id)
-            
-            # Remove the selected paper from the page to allow sampling without replacement
             working_pages[abs_page_idx].remove(paper_id)
 
         return collections.Counter(selected_papers)
+
+    # -------------------------------------------------------------------
+    # Legacy compatibility
+    # -------------------------------------------------------------------
+    def distribution_generator(self, collection_dict):
+        """
+        Legacy wrapper for backward compatibility with older interfaces.
+        """
+        mock_results = {
+            "ids": [collection_dict["id"]],
+            "distances": [collection_dict["distance"]],
+            "metadatas": [[
+                {"year": y, "n_citation": c, "gov_score": g}
+                for y, c, g in zip(
+                    collection_dict["year"],
+                    collection_dict["n_citation"],
+                    collection_dict["gov_score"]
+                )
+            ]]
+        }
+        prepared = self.prepare_candidates(mock_results)
+        return self.rank_and_sample(prepared)

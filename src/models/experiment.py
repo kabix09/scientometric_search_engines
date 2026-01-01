@@ -3,10 +3,9 @@
 """
 Experiment orchestration module.
 
-This module defines the Experiment class, responsible for coordinating
-large-scale simulation runs. It connects the simulation engine
-(VirtualAggregator) with batch processing, checkpointing, and result
-persistence.
+Defines the Experiment class responsible for coordinating
+large-scale simulation runs. It integrates the simulation engine
+(VirtualAggregator) with batching, checkpointing, and result persistence.
 """
 
 import os
@@ -59,7 +58,7 @@ class Experiment:
     # -------------------------------------------------------------------
     def load_queries(self):
         """
-        Load precomputed query embeddings from the interim directory.
+        Load precomputed query embeddings.
         """
         path = "data/interim/queries_with_embeddings.pkl"
         logger.info(f"Loading queries from {path}")
@@ -84,7 +83,7 @@ class Experiment:
         self.load_queries()
 
         progress_status = self.health_check()
-        # Przyjmujemy postęp na podstawie pierwszej konfiguracji (indeks 0)
+        # Resume progress based on the first configuration
         already_saved = int(progress_status.get(0, {}).get("controll_sum", 0) or 0)
 
         logger.info(f"Skipping already processed queries: {already_saved}")
@@ -94,7 +93,6 @@ class Experiment:
         processed = 0
 
         start_index = already_saved
-        # Zapewnienie, że nie wyjdziemy poza zakres dostępnych zapytań
         end_index = min(start_index + batch, len(self.queries))
 
         logger.info(f"Processing query range: {start_index}–{end_index}")
@@ -102,17 +100,22 @@ class Experiment:
         for query_offset, query_embedding in enumerate(
             tqdm(self.queries[start_index:end_index], desc="Queries")
         ):
-            # Zapewnia ciągłość losowości między batchami
+            # Ensure deterministic randomness across batches
             global_query_id = start_index + query_offset
             np.random.seed(hash(str(42 + global_query_id)) % (2**32 - 1))
 
-            # Pobranie wyników wyszukiwania (Top 250)
+            # Retrieve top-N similar articles (single I/O-heavy operation per query)
             self.similar_articles = self.virtual_aggregator.get_similar_articles(
                 query_embedding,
                 max_similarities=250
             )
 
-            # Iteracja przez wszystkie konfiguracje parametrów
+            # Preprocess candidate features once per query
+            prepared_candidates = self.virtual_aggregator.prepare_candidates(
+                self.similar_articles
+            )
+
+            # Iterate over all parameter configurations
             for settings_id, config in enumerate(self.settings):
                 self.virtual_aggregator.set_parameters(
                     config["N"],
@@ -120,9 +123,9 @@ class Experiment:
                     config["pn"]
                 )
 
-                step_distribution = self.step()
+                step_distribution = self.step(prepared_candidates)
 
-                # Buforowanie wyników szczegółowych dla danego zapytania
+                # Buffer per-query results
                 if settings_id not in result_buffer:
                     result_buffer[settings_id] = {
                         "query_id": [global_query_id],
@@ -130,9 +133,11 @@ class Experiment:
                     }
                 else:
                     result_buffer[settings_id]["query_id"].append(global_query_id)
-                    result_buffer[settings_id]["distribution"].append(dict(step_distribution))
+                    result_buffer[settings_id]["distribution"].append(
+                        dict(step_distribution)
+                    )
 
-                # Globalna agregacja rozkładów (dla global_distributions.csv)
+                # Aggregate global distributions
                 settings_key = str(config)
                 if settings_key in distribution_dict:
                     distribution_dict[settings_key].update(step_distribution)
@@ -141,13 +146,12 @@ class Experiment:
 
             processed += 1
 
-            # Okresowy zapis (Checkpoint) co 500 zapytań
-            if processed % 500 == 0:
+            # Periodic checkpointing
+            if processed % 2500 == 0:
                 self.save_distribution(distribution_dict)
                 self.save_results(result_buffer)
                 result_buffer = {}
 
-        # Ostateczny zapis pozostałości w buforze
         logger.info("Final result persistence")
         self.save_distribution(distribution_dict)
         self.save_results(result_buffer)
@@ -155,32 +159,14 @@ class Experiment:
     # -------------------------------------------------------------------
     # Single simulation step
     # -------------------------------------------------------------------
-    def step(self):
+    def step(self, prepared_candidates):
         """
-        Prepare data and execute a single aggregation step.
+        Execute a single aggregation step using preprocessed candidates.
 
         Returns:
             collections.Counter: Sampled paper distribution.
         """
-        collection_dict = {
-            "id": self.similar_articles["ids"][0],
-            "title": self.similar_articles["documents"][0],
-            "distance": self.similar_articles["distances"][0],
-            "year": [
-                metadata["year"]
-                for metadata in self.similar_articles["metadatas"][0]
-            ],
-            "n_citation": [
-                metadata["n_citation"]
-                for metadata in self.similar_articles["metadatas"][0]
-            ],
-            "gov_score": [
-                metadata["gov_score"]
-                for metadata in self.similar_articles["metadatas"][0]
-            ],
-        }
-
-        return self.virtual_aggregator.distribution_generator(collection_dict)
+        return self.virtual_aggregator.rank_and_sample(prepared_candidates)
 
     # -------------------------------------------------------------------
     # Persistence
@@ -190,7 +176,8 @@ class Experiment:
         Save per-configuration simulation results to CSV files.
         """
         for settings_id, data in result_dict.items():
-            if not data["query_id"]: continue # Pomiń puste bufory
+            if not data["query_id"]:
+                continue
             
             directory = f"data/results/{settings_id}"
             os.makedirs(directory, exist_ok=True)
@@ -215,14 +202,14 @@ class Experiment:
 
     def save_distribution(self, distribution_dict):
         """
-        Save aggregated global distributions across configurations.
+        Save aggregated global distributions across all configurations.
         """
         df = pd.DataFrame(
             list(distribution_dict.items()),
             columns=["settings", "distribution"]
         )
         df["distribution"] = df["distribution"].apply(dict)
-        # Zapis do processed jako finalny zbiór kanoniczny
+
         df.to_csv(
             "data/processed/global_distributions.csv",
             index=False
@@ -248,7 +235,6 @@ class Experiment:
             file_path = os.path.join(base_path, str(idx), "results.csv")
             try:
                 with open(file_path, "r") as file:
-                    # Szybkie liczenie linii bez ładowania całego pliku
                     line_count = sum(1 for _ in file) - 1
                     results[idx] = {"controll_sum": max(0, line_count)}
             except FileNotFoundError:
@@ -257,46 +243,43 @@ class Experiment:
         return results
 
     # -------------------------------------------------------------------
-    # Atomic execution (for testing/notebooks)
+    # Atomic execution (testing / notebooks)
     # -------------------------------------------------------------------
     def run_single_query(self, query_id_or_embedding, seed=42):
         """
-        Execute simulation for exactly one query across all settings.
-        Does NOT save results to disk.
+        Execute the simulation for a single query across all configurations.
+        Results are returned in memory and not persisted.
 
         Args:
-            query_id_or_embedding (int or list): Index in self.queries OR raw embedding.
-            seed (int): Seed for reproducibility.
+            query_id_or_embedding (int or list): Query index or raw embedding.
+            seed (int): Random seed for reproducibility.
 
         Returns:
-            dict: {settings_id: Counter_distribution}
+            dict: Mapping of settings_id to distribution counters.
         """
-        # 1. Przygotowanie embeddingu
         if isinstance(query_id_or_embedding, int):
             if self.queries is None:
                 self.load_queries()
             query_embedding = self.queries[query_id_or_embedding]
-            q_id = query_id_or_embedding
         else:
             query_embedding = query_id_or_embedding
-            q_id = "manual_test"
 
-        # 2. Ustawienie ziarna dla tego konkretnego testu
         np.random.seed(seed)
 
-        # 3. Pobranie wyników z bazy (Top 250)
-        self.similar_articles = self.virtual_aggregator.get_similar_articles(
-            query_embedding, 
+        raw_results = self.virtual_aggregator.get_similar_articles(
+            query_embedding,
             max_similarities=250
         )
 
-        # 4. Iteracja przez konfiguracje i zbieranie wyników w pamięci
+        prepared_candidates = self.virtual_aggregator.prepare_candidates(raw_results)
+
         test_results = {}
         for settings_id, config in enumerate(self.settings):
             self.virtual_aggregator.set_parameters(
-                config["N"], config["k"], config["pn"]
+                config["N"],
+                config["k"],
+                config["pn"]
             )
-            # Metoda step() używa aktualnego self.similar_articles
-            test_results[settings_id] = self.step()
+            test_results[settings_id] = self.step(prepared_candidates)
 
         return test_results
