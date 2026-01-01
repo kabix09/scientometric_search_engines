@@ -22,6 +22,9 @@ W trakcie rozwoju silnika `Scientometrics` zidentyfikowano i wyeliminowano błę
     * Wprowadzono transformację logarytmiczną $\log(1+x)$ oraz **Global Scaler** wyuczony na pełnym zbiorze danych (300k+ rekordów). 
     * Zmiana ta zapewnia spójność wyników między batchami oraz poprawną reprezentację rozkładów potęgowych (Power Law), co jest fundamentem rzetelnych badań naukometrycznych.
 
+* **[Korekta metodologii Power Law (Observations vs Frequencies))](changelog/statistical_validity.md)**:
+    * Wyeliminowano błąd polegający na dopasowywaniu modelu do zagregowanych liczności (częstotliwości) zamiast do surowych wartości cytowań.
+    * Skorygowano obliczenia współczynnika α oraz włączono procedurę estymacji progu $x_{min}$​, co umożliwiło poprawne wyznaczenie "ciężkiego ogona" rozkładu (heavy tail) zgodnie ze standardami statystyki matematycznej.
 ---
 
 ## Pozostałe materiały
