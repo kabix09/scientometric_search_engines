@@ -30,15 +30,7 @@ Włączono procedurę automatycznego poszukiwania optymalnej wartości . Algoryt
 
 ### 3. Zastosowanie CCDF (Complementary Cumulative Distribution Function)
 
-Wizualizacja skumulowana została zmieniona z CDF na **CCDF** ().
+Wizualizacja skumulowana została zmieniona z CDF na **CCDF**.
 
 * **Logika:** Zamiast sumować prawdopodobieństwa od zera, CCDF mierzy prawdopodobieństwo, że zmienna przyjmie wartość większą lub równą .
 * **Prezentacja:** W skali log-log, CCDF dla rozkładu potęgowego przyjmuje postać **linii prostej opadającej w dół**. Jest to najsilniejszy wizualny dowód na istnienie prawa potęgowego w danych (nachylenie tej prostej wynosi ).
-
----
-
-## Wpływ na wiarygodność badań
-
-1. **Poprawność Alpha ():** Po poprawce współczynniki nachylenia linii Zipfa wzrosły do poziomów 2.5 – 3.2, co jest całkowicie spójne z literaturą przedmiotu i modelem *preferential attachment*.
-2. **Weryfikacja wizualna (Log-Log):** Zmiana na CCDF pozwoliła na nałożenie teoretycznych linii dopasowania (dashed lines). Jeśli dane symulacji układają się wzdłuż prostej na wykresie log-log CCDF, stanowi to bezpośrednie potwierdzenie, że silnik poprawnie generuje strukturę naukometryczną.
-3. **Analiza ogona rozkładu:** Nowe wykresy pozwalają precyzyjnie zaobserwować zachowanie artykułów o ekstremalnie wysokiej liczbie cytowań, co przy standardowym CDF (rosnącym łuku) było całkowicie nieczytelne.
